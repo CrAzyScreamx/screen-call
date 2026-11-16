@@ -1,0 +1,23 @@
+{
+  "name": "screen-call",
+  "version": "0.1.0",
+  "description": "Video-call style overlay: chat with Claude and see Claude's cursor on your screen",
+  "author": {
+    "name": "CrAzyScreamx"
+  },
+  "license": "MIT",
+  "userConfig": {
+    "overlay_chat": {
+      "type": "boolean",
+      "title": "Chat in the overlay",
+      "description": "Type and send voice messages in the overlay. Needs Claude Code started with the channels flag (see README). Off: chat in the terminal; the overlay keeps Claude's cursor, drawings and messages.",
+      "default": true
+    },
+    "recording_mode": {
+      "type": "boolean",
+      "title": "Recording mode",
+      "description": "Let screen recorders and screen sharing (OBS, Snipping Tool, Teams) capture the overlay. Claude's own screenshots will then show its drawings too.",
+      "default": false
+    }
+  }
+}

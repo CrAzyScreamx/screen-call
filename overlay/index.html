@@ -1,0 +1,187 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  /* Cursor + drawings only. This window never takes focus or the mouse; the chat is its own window (chat.html). */
+  :root { --accent: #d97757; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 14px/1.4 system-ui, sans-serif; }
+
+  #draw { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #draw * { transition: fill-opacity 300ms; }
+  #draw text { font: 600 20px system-ui, sans-serif; paint-order: stroke; stroke: rgba(0,0,0,.7); stroke-width: 4px; }
+
+  #cursor { position: fixed; left: 0; top: 0; z-index: 1; display: none; pointer-events: none;
+            transition: left 400ms ease, top 400ms ease; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+  #cursor .label { position: absolute; left: 22px; top: 20px; white-space: nowrap; max-width: 320px;
+                   overflow: hidden; text-overflow: ellipsis; background: var(--accent); color: #fff;
+                   padding: 3px 8px; border-radius: 6px; font-size: 13px; }
+  #cursor .label:empty { display: none; }
+
+</style>
+</head>
+<body>
+  <svg id="draw" aria-hidden="true"></svg>
+  <div id="cursor" aria-hidden="true">
+    <svg width="28" height="28" viewBox="0 0 24 24"><path d="M3 2l7.5 19 2.6-7.9L21 10.5z" fill="#d97757" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+    <div class="label" dir="auto"></div>
+  </div>
+
+<script>
+  const cursor = document.getElementById('cursor')
+  const NS = 'http://www.w3.org/2000/svg'
+  const svg = document.getElementById('draw')
+  const el = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e }
+  const shapes = new Map() // shape id -> <g>
+  let markers = 0
+  // Hebrew/Arabic first letter = right-to-left text. SVG <text> has no dir="auto", so we decide ourselves.
+  const RTL = /^\P{L}*[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/u
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const frame = () => new Promise(requestAnimationFrame)
+  const label = cursor.querySelector('.label')
+
+  // Fly the cursor to x,y (CSS transition), then resolve once it lands.
+  async function glide(x, y, text = '') {
+    const wasHidden = cursor.style.display !== 'block'
+    cursor.style.display = 'block'
+    cursor.style.transition = wasHidden ? 'none' : ''
+    cursor.style.left = x + 'px'
+    cursor.style.top = y + 'px'
+    label.textContent = text
+    if (!wasHidden) await sleep(420)
+  }
+  // Snap the cursor to x,y with no transition (used while tracing a stroke).
+  function place(x, y) {
+    cursor.style.transition = 'none'
+    cursor.style.left = x + 'px'
+    cursor.style.top = y + 'px'
+  }
+
+  // Each shape lives in its own <g> (with its arrow marker) so it can be replaced or erased by id.
+  // The cursor flies to the start and traces the stroke as it is revealed; text is typed out.
+  async function drawShape(sh) {
+    const g = el('g', {})
+    const node = shapeNode(sh, g)
+    if (!node) return
+    g.append(node)
+    const old = shapes.get(sh.id)
+    old ? old.replaceWith(g) : svg.append(g)
+    shapes.set(sh.id, g)
+
+    if (sh.kind === 'text') {
+      // RTL: keep the label in the same box (x..x+width) but anchor its right edge and type it out right-to-left,
+      // so punctuation lands at the end of the sentence instead of the start.
+      const full = node.textContent
+      const rtl = RTL.test(full)
+      let x = sh.x
+      if (rtl) {
+        node.setAttribute('direction', 'rtl')
+        node.style.unicodeBidi = 'embed'
+        x = sh.x + node.getComputedTextLength()
+        node.setAttribute('x', x)
+      }
+      node.textContent = ''
+      await glide(x, sh.y)
+      for (const ch of full) {
+        node.textContent += ch
+        const w = node.getComputedTextLength()
+        place(rtl ? x - w : x + w, sh.y)
+        await sleep(35)
+      }
+      return
+    }
+
+    const len = node.getTotalLength()
+    const marker = node.getAttribute('marker-end')
+    const fill = node.getAttribute('fill-opacity')
+    node.removeAttribute('marker-end')
+    if (fill) node.setAttribute('fill-opacity', 0)
+    node.style.strokeDasharray = len
+    node.style.strokeDashoffset = len
+    const p0 = node.getPointAtLength(0)
+    await glide(p0.x, p0.y)
+
+    const dur = Math.min(Math.max(len * 0.8, 250), 1500) // ms; ponytail: speed scales with length, capped
+    const t0 = performance.now()
+    for (let t = 0; t < 1;) {
+      await frame()
+      t = Math.min((performance.now() - t0) / dur, 1)
+      const eased = 1 - (1 - t) ** 2
+      node.style.strokeDashoffset = len * (1 - eased)
+      const p = node.getPointAtLength(len * eased)
+      place(p.x, p.y)
+    }
+    node.style.strokeDasharray = node.style.strokeDashoffset = ''
+    if (marker) node.setAttribute('marker-end', marker)
+    if (fill) node.setAttribute('fill-opacity', fill)
+  }
+
+  // Drawing, erasing and pointing play in order, one after another.
+  let queue = Promise.resolve()
+  const enqueue = (fn) => { queue = queue.then(fn).catch(() => {}) }
+
+  function shapeNode(sh, g) {
+    const color = sh.color || '#d97757'
+    const stroke = { stroke: color, 'stroke-width': sh.width || 4, fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }
+    const box = { x: Math.min(sh.x, sh.x2), y: Math.min(sh.y, sh.y2), w: Math.abs(sh.x2 - sh.x), h: Math.abs(sh.y2 - sh.y) }
+    const fill = sh.fill ? { fill: color, 'fill-opacity': 0.2 } : {}
+    if (sh.kind === 'rect') return el('rect', { ...stroke, ...fill, x: box.x, y: box.y, width: box.w, height: box.h, rx: 6 })
+    if (sh.kind === 'circle') return el('ellipse', { ...stroke, ...fill, cx: box.x + box.w / 2, cy: box.y + box.h / 2, rx: box.w / 2, ry: box.h / 2 })
+    if (sh.kind === 'line' || sh.kind === 'arrow') {
+      const line = el('line', { ...stroke, x1: sh.x, y1: sh.y, x2: sh.x2, y2: sh.y2 })
+      if (sh.kind === 'arrow') {
+        // one marker per arrow so each head matches its line color
+        const id = 'm' + markers++
+        const m = el('marker', { id, viewBox: '0 0 10 10', refX: 6, refY: 5, markerWidth: 4, markerHeight: 4, orient: 'auto' })
+        m.append(el('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }))
+        g.append(m)
+        line.setAttribute('marker-end', `url(#${id})`)
+      }
+      return line
+    }
+    if (sh.kind === 'path' && sh.points?.length) return el('polyline', { ...stroke, points: sh.points.map((p) => p.join(',')).join(' ') })
+    if (sh.kind === 'text') {
+      const t = el('text', { x: sh.x, y: sh.y, fill: color })
+      if (sh.width) t.style.fontSize = sh.width + 'px'
+      t.textContent = sh.text || ''
+      return t
+    }
+  }
+
+  // Live low-res stream of the shared screen/window. probeGray() (called by main for wait_for_change polls)
+  // samples its current frame down to the 17x16 grayscale grid the server fingerprints. ponytail: always on
+  // while sharing (~640px @ 4fps); start/stop it around waits if the CPU cost ever shows up.
+  const video = document.createElement('video')
+  video.muted = true
+  let streamReady = Promise.resolve()
+  function openStream(id) {
+    video.srcObject?.getTracks().forEach((t) => t.stop())
+    streamReady = navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxWidth: 640, maxHeight: 640, maxFrameRate: 4 } },
+    }).then((s) => { video.srcObject = s; return video.play() })
+  }
+  const grid = document.createElement('canvas')
+  grid.width = 17
+  grid.height = 16
+  const g2d = grid.getContext('2d', { willReadFrequently: true })
+  g2d.imageSmoothingQuality = 'high' // area-like averaging, so a small change still moves the grid
+  window.probeGray = async () => {
+    await streamReady
+    g2d.drawImage(video, 0, 0, 17, 16)
+    const d = g2d.getImageData(0, 0, 17, 16).data
+    return Array.from({ length: 17 * 16 }, (_, i) => (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3 | 0)
+  }
+
+  sc.onEvent((ev) => {
+    if (ev.type === 'stream') openStream(ev.id)
+    if (ev.type === 'draw') enqueue(async () => { for (const sh of ev.shapes) await drawShape(sh) })
+    if (ev.type === 'erase') enqueue(() => { for (const id of ev.ids) { shapes.get(id)?.remove(); shapes.delete(id) } })
+    if (ev.type === 'clear') enqueue(() => { svg.replaceChildren(); shapes.clear() })
+    if (ev.type === 'point') enqueue(() => glide(ev.x, ev.y, ev.label || ''))
+  })
+</script>
+</body>
+</html>

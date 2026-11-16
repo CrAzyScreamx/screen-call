@@ -1,0 +1,12 @@
+{
+  "name": "screen-call",
+  "owner": { "name": "CrAzyScreamx" },
+  "description": "Video-call style overlay: chat with Claude and see Claude's cursor on your screen",
+  "plugins": [
+    {
+      "name": "screen-call",
+      "source": { "source": "npm", "package": "screen-call" },
+      "description": "Video-call style overlay: chat with Claude and see Claude's cursor on your screen"
+    }
+  ]
+}

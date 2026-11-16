@@ -1,0 +1,43 @@
+{
+  "name": "screen-call",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Video-call style overlay for Claude Code: chat + Claude's cursor on your screen",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "mcp",
+    "overlay",
+    "screen-share"
+  ],
+  "author": "CrAzyScreamx",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CrAzyScreamx/screen-call.git"
+  },
+  "homepage": "https://github.com/CrAzyScreamx/screen-call#readme",
+  "bugs": "https://github.com/CrAzyScreamx/screen-call/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "screen-call": "server.mjs"
+  },
+  "files": [
+    ".claude-plugin/plugin.json",
+    ".mcp.json",
+    "commands",
+    "skills",
+    "overlay",
+    "server.mjs",
+    "npm-shrinkwrap.json"
+  ],
+  "scripts": {
+    "test": "node --test test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "electron": "^38.0.0"
+  }
+}

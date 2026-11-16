@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "call": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server.mjs"
+      ],
+      "env": {
+        "SC_RECORD": "${user_config.recording_mode}",
+        "SC_CHANNEL": "${user_config.overlay_chat}"
+      }
+    }
+  }
+}

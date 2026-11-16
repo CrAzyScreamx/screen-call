@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Share with Claude</title>
+<style>
+  :root { --accent: #d97757; --fg: #f4f4f5; --muted: #a1a1aa; }
+  body { margin: 0; padding: 20px 24px; background: #18181b; color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 16px; color: var(--muted); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  button { display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #27272a; color: inherit; font: inherit;
+           border: 2px solid transparent; border-radius: 10px; cursor: pointer; text-align: left; }
+  button:hover { border-color: #52525b; }
+  button:focus-visible { outline: none; border-color: var(--accent); }
+  img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #09090b; border-radius: 6px; }
+  span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+  <h1>What should Claude see?</h1>
+  <p>Pick a screen or a window. The overlay will sit on top of it. Esc to cancel.</p>
+  <h2 id="screens-h">Screens</h2>
+  <div class="grid" id="screens" aria-labelledby="screens-h"></div>
+  <h2 id="windows-h">Windows</h2>
+  <div class="grid" id="windows" aria-labelledby="windows-h"></div>
+<script>
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+  sc.sources().then((items) => {
+    for (const s of items) {
+      const b = document.createElement('button')
+      const img = document.createElement('img')
+      img.src = s.thumb
+      img.alt = ''
+      const name = document.createElement('span')
+      name.textContent = s.name
+      b.append(img, name)
+      b.addEventListener('click', () => sc.pick(s.id))
+      document.getElementById(s.id.startsWith('screen') ? 'screens' : 'windows').append(b)
+    }
+    document.querySelector('button')?.focus()
+  })
+</script>
+</body>
+</html>

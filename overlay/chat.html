@@ -1,0 +1,230 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src data:; media-src blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Claude</title>
+<style>
+  :root { --accent: #d97757; --bg: rgba(24, 24, 27, 0.96); --fg: #f4f4f5; --muted: #a1a1aa; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 14px/1.4 system-ui, sans-serif; }
+  #chat { position: fixed; inset: 0; display: flex; flex-direction: column;
+          background: var(--bg); color: var(--fg); border: 1px solid rgba(255,255,255,.1); border-radius: 12px; }
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.08);
+           -webkit-app-region: drag; cursor: move; }
+  header button { -webkit-app-region: no-drag; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  header .title { font-weight: 600; }
+  header .sharing { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header button { background: none; border: 0; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0 4px; }
+  header #switch { font-size: 12px; border: 1px solid #52525b; border-radius: 6px; padding: 2px 8px; }
+  header button:hover, header button:focus-visible { color: var(--fg); }
+  #log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 85%; padding: 7px 10px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  .you { align-self: flex-end; background: #3f3f46; }
+  .claude { align-self: flex-start; background: rgba(217,119,87,.2); border: 1px solid rgba(217,119,87,.4); }
+  #status { padding: 0 12px 8px; color: var(--muted); font-size: 12px; font-style: italic; }
+  #status[hidden] { display: none; }
+  #status .dots span { animation: blink 1.2s infinite both; }
+  #status .dots span:nth-child(2) { animation-delay: .2s; }
+  #status .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { #status .dots span { animation: none; } }
+  .msg img { display: block; max-width: 100%; border-radius: 6px; margin-bottom: 6px; }
+  form { position: relative; padding: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+  #tray { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
+  #tray:empty { display: none; }
+  #tray button { flex: none; padding: 0; border: 1px solid #3f3f46; border-radius: 4px; background: none; cursor: pointer; position: relative; }
+  #tray button:hover::after, #tray button:focus-visible::after { content: '×'; position: absolute; inset: 0; display: grid; place-items: center;
+                                                                 background: rgba(0,0,0,.55); color: #fff; font-size: 18px; border-radius: 3px; }
+  #tray img { display: block; height: 44px; border-radius: 3px; }
+  /* camera sits inside the textarea's box, centered on its right edge: form padding 10px + half the 56px textarea */
+  #snap, #mic { position: absolute; right: 18px; bottom: 38px; transform: translateY(50%); padding: 2px; border: 0; background: none; font-size: 22px; line-height: 1;
+          cursor: pointer; opacity: .6; }
+  #mic { right: 48px; }
+  #snap:hover, #snap:focus-visible, #mic:hover, #mic:focus-visible { opacity: 1; outline: none; }
+  #snap:disabled { opacity: .3; cursor: wait; }
+  /* recording: the bar takes the textarea's place */
+  form.recording textarea, form.recording #mic, form.recording #snap { display: none; }
+  #recbar { display: flex; align-items: center; gap: 10px; height: 56px; box-sizing: border-box; padding: 0 8px 0 4px; border-radius: 8px;
+            background: #27272a; border: 1px solid #3f3f46; }
+  #recbar[hidden] { display: none; }
+  #recbar button { border: 0; background: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px 6px; }
+  #recbar button:hover, #recbar button:focus-visible { color: var(--fg); outline: none; }
+  #recbar .rdot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; animation: blink 1.2s infinite both; }
+  #recbar .hint { color: var(--muted); font-size: 12px; }
+  #rec-time, .voice .t { font-variant-numeric: tabular-nums; }
+  #recbar #rec-send { margin-left: auto; width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 16px; }
+  #recbar #rec-send:focus-visible { outline: 2px solid var(--fg); }
+  /* sent voice message */
+  .voice { display: flex; align-items: center; gap: 8px; width: 200px; }
+  .voice button { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 12px; cursor: pointer; }
+  .voice button:focus-visible { outline: 2px solid var(--fg); }
+  .voice .track { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); }
+  .voice .fill { width: 0; height: 100%; border-radius: 2px; background: var(--fg); }
+  .voice .t { font-size: 12px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { #recbar .rdot { animation: none; } }
+  textarea { display: block; width: 100%; box-sizing: border-box; resize: none; height: 56px; padding: 8px 74px 8px 8px; border-radius: 8px;
+             background: #27272a; color: var(--fg); border: 1px solid #3f3f46; font: inherit; }
+  textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+</style>
+</head>
+<body>
+  <section id="chat" aria-label="Chat with Claude">
+    <header title="Drag to move">
+      <span class="dot"></span><span class="title">Claude</span>
+      <span class="sharing" id="sharing" dir="auto"></span>
+      <button id="switch" title="Change what Claude sees">Switch</button>
+      <button id="close" title="End call" aria-label="End call">×</button>
+    </header>
+    <div id="log" role="log" aria-live="polite"></div>
+    <div id="status" role="status" hidden><span class="text"></span><span class="dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></div>
+    <form id="form">
+      <div id="tray" aria-label="Attached screenshots"></div>
+      <textarea id="input" dir="auto" placeholder="Message Claude… (Enter to send)" aria-label="Message"></textarea>
+      <div id="recbar" hidden>
+        <button type="button" id="rec-cancel" title="Cancel (Esc)" aria-label="Cancel recording">🗑</button>
+        <span class="rdot" aria-hidden="true"></span><span id="rec-time" role="timer">0:00</span><span class="hint">Recording…</span>
+        <button type="button" id="rec-send" title="Send voice message" aria-label="Send voice message">➤</button>
+      </div>
+      <button type="button" id="mic" title="Record a voice message" aria-label="Record voice message">🎤</button>
+      <button type="button" id="snap" title="Attach a screenshot (click again for more)" aria-label="Attach screenshot">📷</button>
+    </form>
+  </section>
+<script>
+  const log = document.getElementById('log')
+  const input = document.getElementById('input')
+
+  function add(who, text, imgs = []) {
+    const el = document.createElement('div')
+    el.className = 'msg ' + who
+    el.dir = 'auto' // Hebrew/Arabic messages get RTL order, so "?" and emoji land at the end
+    for (const src of imgs) el.append(Object.assign(document.createElement('img'), { src, alt: 'Screenshot sent to Claude' }))
+    el.append(text)
+    log.append(el)
+    log.scrollTop = log.scrollHeight
+  }
+
+  // "Claude is …" line: shown from your message until Claude replies.
+  const statusEl = document.getElementById('status')
+  let statusTimer
+  function setStatus(text) {
+    clearTimeout(statusTimer)
+    statusEl.hidden = !text
+    statusEl.querySelector('.text').textContent = text ? 'Claude: ' + text : ''
+    // ponytail: no "turn ended" signal reaches the overlay, so a turn that ends without say clears after 60s idle
+    if (text && text !== 'Waiting for you') statusTimer = setTimeout(() => setStatus(''), 60_000) // waits run up to 5 min
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return
+    e.preventDefault()
+    const text = input.value.trim()
+    if (!text && !pending.length) return
+    const ids = takePending(text)
+    sc.sendChat(text, ids)
+    input.value = ''
+    setStatus('Thinking')
+  })
+
+  // Camera: each click attaches one screenshot to the next message; click a thumbnail to drop it.
+  const tray = document.getElementById('tray')
+  let pending = [] // { id, src } waiting to go out with the next message
+  // Show the outgoing message with its thumbnails, empty the tray, return the snap ids to send.
+  function takePending(text) {
+    add('you', text, pending.map((p) => p.src))
+    const ids = pending.map((p) => p.id)
+    pending = []
+    tray.replaceChildren()
+    return ids
+  }
+  const snapBtn = document.getElementById('snap')
+  snapBtn.addEventListener('click', async () => {
+    snapBtn.disabled = true
+    try {
+      const shot = await sc.snap()
+      pending.push(shot)
+      const btn = Object.assign(document.createElement('button'), { type: 'button', title: 'Remove screenshot' })
+      btn.setAttribute('aria-label', 'Remove screenshot')
+      btn.append(Object.assign(document.createElement('img'), { src: shot.src, alt: '' }))
+      btn.addEventListener('click', () => { pending = pending.filter((p) => p !== shot); btn.remove(); input.focus() })
+      tray.append(btn)
+      btn.scrollIntoView({ inline: 'end' })
+    } catch (e) {
+      add('claude', 'Snapshot failed: ' + e.message)
+    } finally {
+      snapBtn.disabled = false
+      input.focus()
+    }
+  })
+  const clock = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0')
+
+  // Sent voice message: play/pause, progress bar, time. secs comes from the recorder (MediaRecorder webm reports no duration).
+  function voiceBubble(url, secs) {
+    const el = Object.assign(document.createElement('div'), { className: 'voice' })
+    el.innerHTML = '<button type="button" aria-label="Play voice message">▶</button><div class="track"><div class="fill"></div></div><span class="t"></span>'
+    const [btn, track, t] = el.children
+    const audio = new Audio(url)
+    t.textContent = clock(secs)
+    const idle = () => { btn.textContent = '▶'; btn.ariaLabel = 'Play voice message' }
+    btn.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()))
+    audio.onplay = () => { btn.textContent = '⏸'; btn.ariaLabel = 'Pause voice message' }
+    audio.onpause = idle
+    audio.ontimeupdate = () => {
+      track.firstChild.style.width = Math.min(100, audio.currentTime / secs * 100) + '%'
+      t.textContent = clock(audio.currentTime)
+    }
+    audio.onended = () => { idle(); track.firstChild.style.width = '0'; t.textContent = clock(secs) }
+    return el
+  }
+
+  // Mic: the input becomes a recording bar (🗑 cancels, ➤ sends, Esc cancels). Claude transcribes with whatever tools it has.
+  const form = document.getElementById('form')
+  // No channel (e.g. Claude Desktop): the user types in the host app, so drop the message box.
+  if (new URLSearchParams(location.search).get('channel') === '0') form.style.display = 'none'
+  const recbar = document.getElementById('recbar')
+  const recTime = document.getElementById('rec-time')
+  let rec = null
+  let send = false
+  document.getElementById('mic').addEventListener('click', async () => {
+    if (rec) return
+    let stream
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }) } catch (e) { return add('claude', 'Microphone unavailable: ' + e.message) }
+    const chunks = []
+    const started = Date.now()
+    const tick = setInterval(() => { recTime.textContent = clock((Date.now() - started) / 1000) }, 250)
+    rec = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+    rec.ondataavailable = (e) => chunks.push(e.data)
+    rec.onstop = async () => {
+      clearInterval(tick)
+      stream.getTracks().forEach((t) => t.stop())
+      rec = null
+      form.classList.remove('recording')
+      recbar.hidden = true
+      input.focus()
+      if (!send) return
+      const secs = Math.max(1, (Date.now() - started) / 1000)
+      const blob = new Blob(chunks, { type: 'audio/webm' })
+      const ids = takePending(voiceBubble(URL.createObjectURL(blob), secs))
+      try { await sc.voice(await blob.arrayBuffer(), ids); setStatus('Thinking') } catch (e) { add('claude', 'Voice message failed: ' + e.message) }
+    }
+    rec.start()
+    recTime.textContent = '0:00'
+    form.classList.add('recording')
+    recbar.hidden = false
+    document.getElementById('rec-send').focus()
+  })
+  const stopRec = (doSend) => { if (rec) { send = doSend; rec.stop() } }
+  document.getElementById('rec-send').addEventListener('click', () => stopRec(true))
+  document.getElementById('rec-cancel').addEventListener('click', () => stopRec(false))
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') stopRec(false) })
+  document.getElementById('close').addEventListener('click', () => sc.quit())
+  document.getElementById('switch').addEventListener('click', () => sc.repick())
+
+  sc.onEvent((ev) => {
+    if (ev.type === 'say') { add('claude', ev.text); setStatus('') }
+    if (ev.type === 'status') setStatus(ev.text)
+    if (ev.type === 'target') { const el = document.getElementById('sharing'); el.textContent = '· ' + ev.name; el.title = ev.name }
+  })
+</script>
+</body>
+</html>
