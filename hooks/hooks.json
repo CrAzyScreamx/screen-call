@@ -1,0 +1,4 @@
+{
+  "description": "Delivers screen-call overlay chat messages to Claude as your prompts",
+  "modules": ["./register.js"]
+}

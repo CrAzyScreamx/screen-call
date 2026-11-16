@@ -1,6 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toDip, shapeToDip, dhash, hamming, waitForChange } from './server.mjs'
+import { toDip, shapeToDip, dhash, hamming, waitForChange, overlayPrompt } from './server.mjs'
+
+test('overlayPrompt tags the message and lists attachments', () => {
+  assert.equal(overlayPrompt({ text: 'hi' }), '[screen-call overlay] hi')
+  assert.equal(overlayPrompt({ text: 'look', snaps: ['3', '4'] }), '[screen-call overlay] look\n(attached screenshots 3, 4: call look with snap=N for each)')})
 
 test('identity when image matches display', () => {
   assert.deepEqual(toDip(100, 50, { imgW: 1280, imgH: 720, dispW: 1280, dispH: 720 }), { x: 100, y: 50 })

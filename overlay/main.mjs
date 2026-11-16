@@ -192,14 +192,10 @@ app.whenReady().then(async () => {
   })
   chat.setAlwaysOnTop(true, 'screen-saver', 1) // one notch above the overlay
   chat.setContentProtection(protect)
-  chat.loadFile(join(here, 'chat.html'), { query: { channel: process.env.SC_CHANNEL === 'true' ? '1' : '0' } })
+  chat.loadFile(join(here, 'chat.html'), { query: { chat: process.env.SC_CHAT === 'true' ? '1' : '0' } })
   chat.on('closed', () => app.quit())
 
   ipcMain.on('sc:chat', (_e, text, snaps) => toClaude(text, snaps))
-  ipcMain.handle('sc:voice', async (_e, audio, snaps) => {
-    const res = await fetch(`${base}/voice${snaps.length ? `?snaps=${snaps.join(',')}` : ''}`, { method: 'POST', headers, body: Buffer.from(audio) })
-    if (!res.ok) throw new Error(`voice: ${res.status}`)
-  })
   // Camera button: screenshot now and park it in the server; it goes to Claude with the next chat message.
   ipcMain.handle('sc:snap', async () => {
     const shot = await shoot()

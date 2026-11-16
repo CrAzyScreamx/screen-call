@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// screen-call MCP server: a two-way channel between Claude Code and the Electron overlay.
+// screen-call MCP server: the bridge between Claude and the Electron overlay.
 import { createServer } from 'node:http'
 import { spawn, execFile } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -8,8 +8,6 @@ import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { mkdir, writeFile } from 'node:fs/promises'
 
 // Map a point in the last screenshot's pixels to display DIPs (what the overlay positions in).
 export function toDip(x, y, s) {
@@ -58,12 +56,13 @@ export async function waitForChange({ base, probe, interrupted, ticks, sleep, se
   return 'timeout'
 }
 
-// Overlay chat rides a Claude Code channel. Off (or unset, e.g. Claude Desktop): the user chats in the host app.
-const CHANNEL = process.env.SC_CHANNEL === 'true'
-const INSTRUCTIONS = `${CHANNEL ? `The user talks to you through the screen-call overlay: messages arrive as <channel source="call">.
-They cannot see the terminal: answer ONLY with the say tool, short and conversational.
-If the tag has a snaps attribute (e.g. snaps="3,4"), the user attached those screenshots: call look with snap=N for each one.
-A voice attribute is a voice message: the path of a .webm (Opus) recording. Transcribe it with whatever you have (a transcription MCP tool, or a local CLI such as whisper/faster-whisper via Bash; convert with ffmpeg if the tool needs wav; if a tool cannot read the path, pass the file as base64), then answer what they said. If nothing you have can transcribe, use say to tell them what to install or connect (e.g. "pip install openai-whisper" plus ffmpeg, or a transcription MCP server) and ask them to type meanwhile.` : `The screen-call overlay shows your cursor, drawings and say messages on the user's screen. The user talks to you in this chat, so reply here as usual; use say for short on-screen lines.`}
+// Overlay chat: messages queue in the inbox tool, and the plugin's mod (hooks/register.js) submits them as the
+// user's prompts. Off (or unset, e.g. Claude Desktop): the user chats in the host app.
+const CHAT = process.env.SC_CHAT === 'true'
+export const OVERLAY_TAG = '[screen-call overlay]'
+const INSTRUCTIONS = `${CHAT ? `The user talks to you through the screen-call overlay: their messages arrive as prompts starting with ${OVERLAY_TAG}.
+They cannot see the terminal: answer those ONLY with the say tool, short and conversational. Never call the inbox tool yourself.
+If a message lists attached screenshots, call look with snap=N for each one.` : `The screen-call overlay shows your cursor, drawings and say messages on the user's screen. The user talks to you in this chat, so reply here as usual; use say for short on-screen lines.`}
 For anything about their screen, call look first. point(x,y) uses pixel coords of the latest look image; add a label to explain what you point at.
 draw annotates the screen with shapes (same coords) and returns their ids: draw again with an id to edit that shape, erase(ids) to remove some, clear to remove all.
 To wait for the user to act on screen, use wait_for_change (free) instead of repeated look calls.
@@ -122,7 +121,16 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { timeout: { type: 'number', description: 'Seconds, default 60, max 300' } } },
   },
   { name: 'clear', description: "Remove all drawings from the user's screen.", inputSchema: { type: 'object', properties: {} } },
+  { name: 'inbox', description: "Internal to the screen-call plugin: its mod drains the overlay's chat messages with this. Never call it.", inputSchema: { type: 'object', properties: {} } },
 ]
+
+// One overlay message as the prompt Claude reads: the text, plus what the user attached.
+export function overlayPrompt({ text, snaps = [] }) {
+  return [
+    `${OVERLAY_TAG} ${text}`,
+    snaps.length && `(attached screenshots ${snaps.join(', ')}: call look with snap=N for each)`,
+  ].filter(Boolean).join('\n')
+}
 
 async function main() {
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js')
@@ -151,9 +159,10 @@ async function main() {
   }
 
   const mcp = new Server(
-    { name: 'screen-call', version: '0.1.0' },
-    { capabilities: { ...(CHANNEL && { experimental: { 'claude/channel': {} } }), tools: {} }, instructions: INSTRUCTIONS },
+    { name: 'screen-call', version: '0.2.0' },
+    { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
   )
+  const inbox = [] // overlay messages waiting for the mod to submit them
 
   const readRaw = (req) => new Promise((resolve, reject) => {
     const chunks = []
@@ -163,18 +172,13 @@ async function main() {
   })
   const readBody = async (req) => (await readRaw(req)).toString('utf8')
 
-  // snap ids ride in meta, not the text, so typing "(snapshot 3)" can't pass for an attachment
-  const toChannel = (url, content, meta = {}) => {
+  // snap ids come from the query string, checked against real snapshots, so typed text can't fake an attachment
+  const toInbox = (url, text) => {
     const ids = (url.searchParams.get('snaps') ?? '').split(',').filter((id) => snaps.has(Number(id)))
-    if (ids.length) meta.snaps = ids.join(',')
-    if (!content && !Object.keys(meta).length) return
+    if (!text && !ids.length) return
     chatSeq++
-    return mcp.notification({
-      method: 'notifications/claude/channel',
-      params: { content: content || '(screenshot attached)', ...(Object.keys(meta).length && { meta }) },
-    })
+    inbox.push(overlayPrompt({ text: text || '(screenshot attached)', snaps: ids }))
   }
-  const voiceDir = join(tmpdir(), 'screen-call')
 
   function startHttp() {
     if (http) return Promise.resolve()
@@ -193,18 +197,7 @@ async function main() {
       }
 
       if (req.method === 'POST' && url.pathname === '/chat') {
-        await toChannel(url, (await readBody(req)).trim())
-        return res.writeHead(204).end()
-      }
-
-      // Mic button: save the clip so whatever transcriber Claude has can read it by path.
-      if (req.method === 'POST' && url.pathname === '/voice') {
-        const audio = await readRaw(req)
-        if (!audio.length) return res.writeHead(400).end()
-        await mkdir(voiceDir, { recursive: true })
-        const file = join(voiceDir, `voice-${Date.now()}.webm`) // ponytail: left in %TEMP%, the OS cleans it
-        await writeFile(file, audio)
-        await toChannel(url, '(voice message)', { voice: file })
+        toInbox(url, (await readBody(req)).trim())
         return res.writeHead(204).end()
       }
 
@@ -274,7 +267,7 @@ async function main() {
     ]
   }
 
-  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
+  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CHAT ? TOOLS : TOOLS.filter((t) => t.name !== 'inbox') }))
 
   // Activity line in the chat, so the user sees what Claude is doing between replies. Best effort: never fails a tool.
   const STATUS = { look: 'Looking at your screen', point: 'Pointing', draw: 'Drawing', erase: 'Erasing', clear: 'Clearing', wait_for_change: 'Waiting for you' }
@@ -303,6 +296,7 @@ async function main() {
         }
         case 'erase': emit({ type: 'erase', ids: (a.ids ?? []).map(String) }); return text('erased')
         case 'clear': emit({ type: 'clear' }); return text('cleared')
+        case 'inbox': return text(inbox.splice(0).join('\n\n')) // empty text = nothing new
         case 'wait_for_change': {
           const secs = Math.min(Math.max(Number(a.timeout) || 60, 4), 300)
           const seq = chatSeq

@@ -2,7 +2,7 @@
 
 A "video call" with Claude. An always-on-top overlay puts Claude's own cursor on your screen: Claude looks at what you share, points at things, draws arrows and boxes, and talks to you in a small chat window. Ask "show me how to do X" and it walks you through it step by step, marking the next thing to click and waiting for your screen to change.
 
-Works with **Claude Code** (full experience, including chatting and voice messages in the overlay) and **Claude Desktop** (cursor and drawings in the overlay; you chat in Desktop).
+Works with **Claude Code** (full experience, including chatting in the overlay) and **Claude Desktop** (cursor and drawings in the overlay; you chat in Desktop).
 
 [![npm](https://img.shields.io/npm/v/screen-call)](https://www.npmjs.com/package/screen-call)
 
@@ -22,14 +22,10 @@ Works with **Claude Code** (full experience, including chatting and voice messag
 
 The install dialog asks two things (change them later in `/config`):
 
-- **Chat in the overlay** (on by default): type and send voice messages in the overlay. Turn it off to chat in the terminal; the overlay still shows Claude's cursor, drawings and messages.
+- **Chat in the overlay** (on by default): type messages in the overlay. Turn it off to chat in the terminal; the overlay still shows Claude's cursor, drawings and messages.
 - **Recording mode** (off by default): see [Recording the screen](#recording-the-screen).
 
-The overlay chat uses Claude Code [channels](https://code.claude.com/docs/en/channels) (research preview). Custom channels aren't on the allowlist yet, so start Claude Code with:
-
-```powershell
-claude --dangerously-load-development-channels plugin:screen-call@screen-call
-```
+The overlay chat needs no flags: start Claude Code as usual with `claude`. The plugin includes a [mod](https://code.claude.com/docs/en/plugins/mods/overview) that sends each overlay message to Claude as your own prompt. This needs Claude Code v2.1.287 or later; tested with v2.1.325. Mods don't load under `--safe-mode`, `--bare`, `disableAllHooks`, or an organization policy that blocks them.
 
 The first call downloads Electron (~100 MB), so give it a minute.
 
@@ -58,9 +54,9 @@ A picker opens: choose a screen, or a single window (the overlay then follows th
 
 Ask for anything that takes several steps ("help me turn on 2FA on GitHub") and Claude marks the next thing to click, waits for your screen to change, checks you got there, and marks the next step.
 
-### Voice messages and screenshots (Claude Code)
+### Screenshots (Claude Code)
 
-Click 🎤 in the chat to record, ⏹ to send (Esc cancels). Claude transcribes the clip with whatever you have connected (a transcription MCP server, or a local CLI like `whisper`); if nothing can, it tells you what to install. Click 📷 to attach a screenshot of the exact moment to your next message.
+Click 📷 in the chat to attach a screenshot of the exact moment to your next message.
 
 ## Recording the screen
 
@@ -82,6 +78,7 @@ Claude then sees its own cursor and drawings in its screenshots too, so it clear
 | `draw(shapes)` | Draws `rect`, `circle`, `arrow`, `line`, `text`, `path` (same coords); `fill`, `color`, `width`. Returns shape ids; pass an `id` to edit that shape |
 | `erase(ids)` | Removes specific drawings |
 | `clear()` | Removes all drawings |
+| `inbox()` | Internal: the plugin's mod drains overlay chat messages with it. Claude never calls it |
 | `wait_for_change(timeout?)` | Waits (no tokens spent) until the shared view changes and settles, then returns the new screenshot; returns early on a chat message |
 
 Outside auto mode, add an allow rule for the plugin's tools so `say` doesn't prompt every time.
