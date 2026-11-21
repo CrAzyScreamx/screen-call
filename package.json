@@ -1,6 +1,6 @@
 {
   "name": "screen-call",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Video-call style overlay for Claude Code: chat + Claude's cursor on your screen",
   "keywords": [
@@ -27,6 +27,8 @@
   "files": [
     ".claude-plugin/plugin.json",
     "commands",
+    "hooks/hooks.json",
+    "hooks/register.js",
     "skills",
     "overlay",
     "server.mjs",
